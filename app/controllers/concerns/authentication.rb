@@ -2,51 +2,42 @@ module Authentication
   extend ActiveSupport::Concern
 
   included do
-    before_action :require_authentication
+    before_action :authenticate_request!
     helper_method :authenticated?
   end
 
   class_methods do
     def allow_unauthenticated_access(**options)
-      skip_before_action :require_authentication, **options
+      skip_before_action :authenticate_request!, **options
     end
   end
 
   private
-    def authenticated?
-      resume_session
-    end
 
-    def require_authentication
-      resume_session || request_authentication
-    end
+  def authenticate_request!
+    token = extract_token_from_header
+    payload = JwtService.decode(token)
 
-    def resume_session
-      Current.session ||= find_session_by_cookie
-    end
-
-    def find_session_by_cookie
-      Session.find_by(id: cookies.signed[:session_id]) if cookies.signed[:session_id]
-    end
-
-    def request_authentication
-      session[:return_to_after_authenticating] = request.url
-      redirect_to new_session_path
-    end
-
-    def after_authentication_url
-      session.delete(:return_to_after_authenticating) || root_url
-    end
-
-    def start_new_session_for(user)
-      user.sessions.create!(user_agent: request.user_agent, ip_address: request.remote_ip).tap do |session|
-        Current.session = session
-        cookies.signed.permanent[:session_id] = { value: session.id, httponly: true, same_site: :lax }
+    case payload
+    when :expired
+      render json: { error: "Expired token" }, status: unauthorized
+    when Hash
+      if (user = User.find_by(id: payload[:user_id]))
+        Current.user = user
+      else
+        render json: { error: "User not found" }, status: unauthorized
       end
+    else
+      render json: { error: "Unauthorized" }, status: unauthorized
     end
+  end
 
-    def terminate_session
-      Current.session.destroy
-      cookies.delete(:session_id)
-    end
+  def authenticated?
+    Current.user.present?
+  end
+
+  def extract_token_from_header
+    header = request.headers["Authorization"]
+    header&.split(" ")&.last if header&.start_with?("Bearer ")
+  end
 end
