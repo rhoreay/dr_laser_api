@@ -3,7 +3,6 @@ module Authentication
 
   included do
     before_action :authenticate_request!
-    helper_method :authenticated?
   end
 
   class_methods do
@@ -17,23 +16,18 @@ module Authentication
   def authenticate_request!
     token = extract_token_from_header
     payload = JwtService.decode(token)
-
     case payload
     when :expired
-      render json: { error: "Expired token" }, status: unauthorized
+      render json: { error: "Expired token" }, status: :unauthorized
     when Hash
       if (user = User.find_by(id: payload[:user_id]))
         Current.user = user
       else
-        render json: { error: "User not found" }, status: unauthorized
+        render json: { error: "User not found" }, status: :unauthorized
       end
     else
-      render json: { error: "Unauthorized" }, status: unauthorized
+      render json: { error: "Unauthorized" }, status: :unauthorized
     end
-  end
-
-  def authenticated?
-    Current.user.present?
   end
 
   def extract_token_from_header
